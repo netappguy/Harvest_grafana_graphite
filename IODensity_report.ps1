@@ -6,7 +6,7 @@ Information on running PowerShell scripts can be found here, as the SaaS methodo
     -https://technet.microsoft.com/en-us/library/bb613481.aspx
     -http://www.netapp.com/us/media/tr-4548.pdf
 File Name:  IODensityReport.ps1
-Version: 1.0 (Also reflected in -ShowVersion parameter)
+Version: 1.1 (Also reflected in -ShowVersion parameter)
 .COMPONENT  
     -PowerShell version 4.0 or greater required (which requires .NET Framework 4.5 or greater be installed first)
     -PowerShell must be preferably launched "Run as Administrator"
