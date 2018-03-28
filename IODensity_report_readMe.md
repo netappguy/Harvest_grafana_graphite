@@ -1,9 +1,9 @@
 This script create an IO Density report from Graphite data, that can be used for the SDW.
 
 Information on running PowerShell scripts can be found here, as the SaaS methodology TR:
-    -http://ss64.com/ps/syntax-run.html
-    -https://technet.microsoft.com/en-us/library/bb613481.aspx
-    -http://www.netapp.com/us/media/tr-4548.pdf
+    * http://ss64.com/ps/syntax-run.html
+    * https://technet.microsoft.com/en-us/library/bb613481.aspx
+    * http://www.netapp.com/us/media/tr-4548.pdf
 
 File Name:  IODensityReport.ps1
 Version: 1.1 (Also reflected in -ShowVersion parameter)
