@@ -1,18 +1,21 @@
-.NOTES
+This script create an IO Density report from Graphite data, that can be used for the SDW.
+
 Information on running PowerShell scripts can be found here, as the SaaS methodology TR:
     -http://ss64.com/ps/syntax-run.html
     -https://technet.microsoft.com/en-us/library/bb613481.aspx
     -http://www.netapp.com/us/media/tr-4548.pdf
+
 File Name:  IODensityReport.ps1
-Version: 1.0 (Also reflected in -ShowVersion parameter)
-.COMPONENT  
+Version: 1.1 (Also reflected in -ShowVersion parameter)
+
+Pre Requisite:
+
     -PowerShell version 4.0 or greater required (which requires .NET Framework 4.5 or greater be installed first)
     -PowerShell must be preferably launched "Run as Administrator"
     -NetApp PowerShell Toolkit 3.2.1 or newer: http://mysupport.netapp.com/NOW/download/tools/powershell_toolkit/
-.DESCRIPTION
-This script create an IO Density report from Graphite data, that can be used for the SDW.
 
 Available parameters are:
+
 * naboxip: This parameter should match the Graphite server IP address
 * Protocol: This parameter indicates the protocol to be used to access the Graphite Database: HTTP or HTTPS (default).
 * Port: This parameter indicates the Port to be used to access the Graphite Dtabase: Defaut is 443
