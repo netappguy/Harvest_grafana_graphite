@@ -6,7 +6,7 @@ Information on running PowerShell scripts can be found here, as the SaaS methodo
     -https://technet.microsoft.com/en-us/library/bb613481.aspx
     -http://www.netapp.com/us/media/tr-4548.pdf
 File Name:  IODensityReport.ps1
-Version: 1.1 (Also reflected in -ShowVersion parameter)
+Version: 1.0 (Also reflected in -ShowVersion parameter)
 .COMPONENT  
     -PowerShell version 4.0 or greater required (which requires .NET Framework 4.5 or greater be installed first)
     -PowerShell must be preferably launched "Run as Administrator"
@@ -79,7 +79,7 @@ $NetAppDetailsCSVFile=".\IODensityDetails.csv"
 #########################################################################
 #
 # Script to create an IODensity Report from Graphite Database (read: from nabox)
-# Version: 1.1
+# Version: 1.2
 # 09-14-2017
 # Marc Ferber NetApp
 #
@@ -144,11 +144,11 @@ param (
 #
 cls
 
-$ScriptVersion="1.1.0"
-if ($ShowVersion)
+$ScriptVersion="1.2.0"
+if ($ShowVersion.IsPresent)
 {
     Write-Host "==> Current script version is: $ScriptVersion" -ForegroundColor green
-    Write-Host "==> Download updates at: ??? tbd" -ForegroundColor green
+    Write-Host "==> Download updates at: https://github.com/netappguy/Harvest_grafana_graphite" -ForegroundColor green
     Exit
 }
 
@@ -400,7 +400,7 @@ function Create-TheMatrixNeo
 		$SysInfos=Get-Nasysteminfo
 		$Ontap=Get-NaSystemVersion
 		write-host $(" ==> " + $Ontap) -ForegroundColor yellow 
-		if ($Global:ExcludeRootVol)
+		if ($Global:ExcludeRootVol.IsPresent)
 		{
 			$VolRoot=(get-navolroot).Name
 			$Volumes=get-navol | where {$_.Name -ne $VolRoot}
@@ -411,6 +411,8 @@ function Create-TheMatrixNeo
 		}
 		$disks=get-nadisk | where {$_.Aggregate -ne $null}
 		$Luns=Get-NaLun
+		$SnapMirrors=Get-NcSnapmirror
+		$SnapMirrorsDest=Get-NcSnapmirrorDestination
 		
 		$VolURIs=(Invoke-WebRequest -usebasicparsing -Uri ($URI + "metrics/find?query=" + $NetAppInstance.id + ".vol.*") | ConvertFrom-Json).id
 		foreach($volume in $volumes)
@@ -430,9 +432,21 @@ function Create-TheMatrixNeo
 				$Prop | Add-Member -type NoteProperty -Name 'Array' -Value $sysinfos.SystemName
 				$Prop | Add-Member -type NoteProperty -Name 'Aggregate' -Value $($sysinfos.SystemName + ":" + $volume.ContainingAggregate)
 				$Prop | Add-Member -type NoteProperty -Name 'Volume' -Value $($sysinfos.SystemName + ":" + $volume.OwningVfiler + ":" + $volume.Name)
-				$Prop | Add-Member -type NoteProperty -Name 'Volume Type' -Value $volume.Type
-				$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "N/A"
-				$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "N/A"
+				$Prop | Add-Member -type NoteProperty -Name 'Volume Type' -Value $volume.VolumeIdAttributes.Style
+				if (($SnapMirrors).DestinationLocation -match (":" + $volume.Name + "$"))
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "TRUE"
+				} else
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "FALSE"
+				}
+				if (($SnapMirrorsDest).SourceLocation -match (":" + $volume.Name + "$"))
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "TRUE"
+				} else
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "FALSE"
+				}
 				$diskTypes=($disks | where {$_.Aggregate -eq $volume.Aggregate}).StorageDiskInfo.DiskInventoryInfo.DiskType | Select-Object -Unique
 				if (@($diskTypes).count -eq 1)
 				{
@@ -494,7 +508,7 @@ function Create-TheMatrixNeo
 		$SysInfos=Get-NcNode
 		$Ontap=(Get-NcSystemVersion).value
 		write-host $(" ==> " + $Ontap) -ForegroundColor yellow 
-		if ($Global:ExcludeRootVol)
+		if ($Global:ExcludeRootVol.IsPresent)
 		{
 			$volumes=get-ncvol | where { $_.VolumeStateAttributes.IsNodeRoot -ne $true -and $_.VolumeStateAttributes.IsVserverRoot -ne $true }
 		}
@@ -502,7 +516,7 @@ function Create-TheMatrixNeo
 		{
 			$volumes=get-ncvol
 		}
-		if ($Global:ExcludeMDVVol)
+		if ($Global:ExcludeMDVVol.IsPresent)
 		{
 			$volumes=$volumes | where {$_.Name -notlike "MDV_???_*"}
 		}
@@ -808,3 +822,35 @@ write-host "Script executed in: " -NoNewLine
 write-host $elapsed -NoNewLine -ForeGroundColor Green
 write-host " sec"
 $StopWatch.Stop()
+
+<#
+$Volumes=@()
+foreach ($NetApp in ($global:NetAppList | where {$_.Selected -eq "1"}))
+{
+	if ($NetApp.Mode -eq "Classic")
+	{
+		$perfTree=""
+	}
+	$TmpVolList=Invoke-WebRequest -usebasicparsing -Uri ($NetApp.URI + "*") | ConvertFrom-Json
+	$Volumes=$Volumes + $TmpVolList
+	$connect=Connect-NaController 192.168.121.175 -Credential(Get-Credential)
+}
+
+foreach ($volume in $Volumes)
+{
+	$VolumeStats=@()
+}
+
+
+7-Mode:
+
+
+wv_fsinfo_blks_used
+
+
+select * from cm_storage.aggregate aggr,cm_storage.disk_aggregate dska,cm_storage.disk disk
+where aggr.id=dska.aggregate_id
+and disk.id=dska.disk_id;
+select * from cm_storage.volume;
+
+#>
