@@ -12,7 +12,7 @@ Version: 1.0 (Also reflected in -ShowVersion parameter)
     -PowerShell must be preferably launched "Run as Administrator"
     -NetApp PowerShell Toolkit 3.2.1 or newer: http://mysupport.netapp.com/NOW/download/tools/powershell_toolkit/
 .DESCRIPTION
-This script create an IO Density report from Graphite data, that can be used for the SDW.
+This script create an IO Density report from Graphite data, that can be used for the SDW (Service Delivery WorkShop).
 
 Available parameters are:
 * naboxip: This parameter should match the Graphite server IP address
@@ -50,8 +50,10 @@ Available parameters are:
 	==> Third NetApp:  Password is provided encrypted.
 	
 	Note : an easy method is to put the password in clear text in the file, run the script and answers y when asked to overwrite the file with encrypted password.
-* ExcludeRootVol: if set, all root volumes will be exlcuded from the report (included SVMs root volume)
-* ExcludeMDVVol: if set, all MetaData (MDV_???_xxxx) volume will be excluded from the report
+* ExcludeRootVol: if set, all root volumes will be excluded from the report (included SVMs root volume)
+* ExcludeSVMRootVol: if set, all root volumes pertaining to SVM's will be excluded from the report
+* ExcludeMDVVol: if set, all MetaData (MDV_???_xxxx) volumes will be excluded from the report
+* ExcludeTempVol: if set, all temporary volumes (that is created during vol move) will be excluded from the report
 * ShowVersion: Get the script version.
 .EXAMPLE
 .\IODensity_report.ps1
@@ -79,8 +81,8 @@ $NetAppDetailsCSVFile=".\IODensityDetails.csv"
 #########################################################################
 #
 # Script to create an IODensity Report from Graphite Database (read: from nabox)
-# Version: 1.2
-# 09-14-2017
+# Version: 1.3.1
+# 02-05-2019
 # Marc Ferber NetApp
 #
 #########################################################################
@@ -108,15 +110,21 @@ param (
 	#[parameter(ParameterSetName="seta")]
 	[string]$NetAppSelection,
 	
-	[parameter(Mandatory=$false, HelpMessage="CSV File containing all the controlers information if not provided by using NetAppSelection")]
+	[parameter(Mandatory=$false, HelpMessage="CSV File containing all the controllers information if not provided by using NetAppSelection")]
 	#[parameter(ParameterSetName="setb")]
 	[string]$NetAppDetailsCSVFile,
 
 	[parameter(Mandatory=$false, HelpMessage="Do we want to exclude the root volumes..")]
 	[switch]$ExcludeRootVol,
 	
+	[parameter(Mandatory=$false, HelpMessage="Do we want to exclude the SVM's Root volumes..")]
+	[switch]$ExcludeSVMRootVol,
+
 	[parameter(Mandatory=$false, HelpMessage="Do we want to exclude the MDVs volumes..")]
 	[switch]$ExcludeMDVVol,
+
+	[parameter(Mandatory=$false, HelpMessage="Do we want to exclude the TEMPs volumes..")]
+	[switch]$ExcludeTempVol,
 	
 	[parameter(Mandatory=$false, HelpMessage="Get the script version..")]
 	[switch]$ShowVersion
@@ -140,11 +148,11 @@ param (
 # ==> Second NetApp :Password is not provided : it will be asked during script execution
 # ==> Third NetApp :Password is provided encrypted.
 #
-# Note : an easy method is to put the password in clear text in the file, run the script and answers y when asked to overwrite the file with encrypted password.
+# Note : an easy method to have encrypted password in the file, is to put the password in clear text first in the file, run the script and answers y when asked to overwrite the file with encrypted password.
 #
 cls
 
-$ScriptVersion="1.2.0"
+$ScriptVersion="1.3.1"
 if ($ShowVersion.IsPresent)
 {
     Write-Host "==> Current script version is: $ScriptVersion" -ForegroundColor green
@@ -182,9 +190,36 @@ if (!(Get-Module DataONTAP))
 }
 write-host "OK" -ForegroundColor green
 
-write-host "Checking Protocol: " -NoNewline
+write-host "Checking Exclusion ..."
+if ($ExcludeRootVol.IsPresent)
+{
+	Write-Host " ==> Root Volumes will be Excluded from report" -ForegroundColor Yellow
+}
+
+if ($ExcludeSVMRootVol.IsPresent)
+{
+	Write-Host " ==> SVM's Root Volumes will be Excluded from report" -ForegroundColor Yellow
+}
+
+if ($ExcludeMDVVol.IsPresent)
+{
+	Write-Host " ==> MDV's (MetaData Volumes) Volumes will be Excluded from report" -ForegroundColor Yellow
+}
+
+if ($ExcludeTempVol.IsPresent)
+{
+	Write-Host " ==> TEMP's Volumes will be Excluded from report" -ForegroundColor Yellow
+}
+
+write-host "Exclusion Validated..." -ForegroundColor green
+
+write-host "Checking Protocol '" -NoNewline
+write-host $Protocol -ForegroundColor Yellow -NoNewline
+write-host "': " -NoNewline
 if ($Protocol -eq "https")
 {
+#Solve SSL/TLS 1.2 error !
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 #Solve certificate issue with powershell no character should be inserted before each line !
 $TAllCPolicy = @"
 using System.Net;
@@ -202,7 +237,10 @@ Add-Type -TypeDefinition $TAllCPolicy
 }
 write-host "OK" -ForegroundColor green
 
-write-host "Grabbing Graphite Inventory: " -NoNewline
+$URI=$Protocol + "://" + $naboxip + ":" + $Port + "/graphite/"
+write-host "Grabbing Graphite Inventory from '" -NoNewline
+write-host $URI -ForegroundColor Yellow -NoNewline
+write-host "': " -NoNewline
 if (!(Test-Connection $naboxip -Count 1 -Quiet))
 {
 	write-host "NOK" -ForegroundColor red
@@ -210,7 +248,7 @@ if (!(Test-Connection $naboxip -Count 1 -Quiet))
 }
 
 #Grabbing nabox monitored storage list.
-$URI=$Protocol + "://" + $naboxip + ":" + $Port + "/graphite/"
+
 $Global:NetAppInstances=Invoke-WebRequest -usebasicparsing -Uri ($URI + "metrics/find?query=netapp.perf.*.*") -TimeoutSec 30 -ErrorAction Stop | ConvertFrom-Json
 $Global:NetAppInstances+=Invoke-WebRequest -usebasicparsing -Uri ($URI + "metrics/find?query=netapp.perf7.*.*") -TimeoutSec 30 -ErrorAction Stop | ConvertFrom-Json
 if ($Global:NetAppInstances)
@@ -371,7 +409,7 @@ function Show-Menu
 
 if (($NetAppSelection) -and ($NetAppDetailsCSVFile))
 {
-	throw "you cannot use both NetAppSelection and NetAppDetailsCSVFile switch at the same time ! exiting"
+	throw "You cannot use both NetAppSelection and NetAppDetailsCSVFile switch at the same time ! Exiting"
 }
 $SelectionnedNetApps=@()
 $global:IODensity=@()
@@ -400,7 +438,7 @@ function Create-TheMatrixNeo
 		$SysInfos=Get-Nasysteminfo
 		$Ontap=Get-NaSystemVersion
 		write-host $(" ==> " + $Ontap) -ForegroundColor yellow 
-		if ($Global:ExcludeRootVol.IsPresent)
+		if ($ExcludeRootVol.IsPresent)
 		{
 			$VolRoot=(get-navolroot).Name
 			$Volumes=get-navol | where {$_.Name -ne $VolRoot}
@@ -411,8 +449,8 @@ function Create-TheMatrixNeo
 		}
 		$disks=get-nadisk | where {$_.Aggregate -ne $null}
 		$Luns=Get-NaLun
-		$SnapMirrors=Get-NcSnapmirror
-		$SnapMirrorsDest=Get-NcSnapmirrorDestination
+		$SnapMirrors=Get-NaSnapmirror
+		$SnapMirrorsDest=Get-NaSnapmirrorDestination
 		
 		$VolURIs=(Invoke-WebRequest -usebasicparsing -Uri ($URI + "metrics/find?query=" + $NetAppInstance.id + ".vol.*") | ConvertFrom-Json).id
 		foreach($volume in $volumes)
@@ -432,33 +470,57 @@ function Create-TheMatrixNeo
 				$Prop | Add-Member -type NoteProperty -Name 'Array' -Value $sysinfos.SystemName
 				$Prop | Add-Member -type NoteProperty -Name 'Aggregate' -Value $($sysinfos.SystemName + ":" + $volume.ContainingAggregate)
 				$Prop | Add-Member -type NoteProperty -Name 'Volume' -Value $($sysinfos.SystemName + ":" + $volume.OwningVfiler + ":" + $volume.Name)
-				$Prop | Add-Member -type NoteProperty -Name 'Volume Type' -Value $volume.VolumeIdAttributes.Style
-				if (($SnapMirrors).DestinationLocation -match (":" + $volume.Name + "$"))
+				if ($volume.VolumeIdAttributes.Style -eq $Null)
+				{
+					if ($volume.Type -eq "flex")
+					{
+						$Prop | Add-Member -type NoteProperty -Name 'Volume Type' -Value "flexvol"
+					}
+				} else
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Volume Type' -Value $volume.VolumeIdAttributes.Style
+				}
+				if (($SnapMirrors).Destination -match ($sysinfos.SystemName + ":" + $volume.Name + "$"))
 				{
 					$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "TRUE"
 				} else
 				{
 					$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "FALSE"
 				}
-				if (($SnapMirrorsDest).SourceLocation -match (":" + $volume.Name + "$"))
+				if (($SnapMirrorsDest).SourceLocation -match ($sysinfos.SystemName + ":" + $volume.Name + "$"))
 				{
 					$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "TRUE"
 				} else
 				{
 					$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "FALSE"
 				}
-				$diskTypes=($disks | where {$_.Aggregate -eq $volume.Aggregate}).StorageDiskInfo.DiskInventoryInfo.DiskType | Select-Object -Unique
-				if (@($diskTypes).count -eq 1)
+				$diskTypesList=($disks | where {$_.Aggregate -eq $volume.Aggregate}).StorageDiskInfo.DiskInventoryInfo.DiskType
+				$diskTypes = $diskTypesList | Select-Object -Unique
+				if ((@($diskTypes).count -eq 1) -or (@($diskTypes).count -gt 1 -and $diskTypesList -notcontains "SSD"))
 				{
+					if (@($diskTypes).count -gt 1)
+					{
+						$maxdisktypeCount=0
+						$maxdisktype="None"
+						foreach($disktype in $disktypes)
+						{
+							if (($diskTypesList | where {$_ -eq $disktype} | Measure-Object).Count -gt $maxdisktypeCount)
+							{
+								$maxdisktypeCount=($diskTypesList | where {$_ -eq $disktype} | Measure-Object).Count
+								$maxdisktype=$disktype
+							}
+						}
+						$diskTypes=$maxdisktype
+					}
 					$Flashpool="Disabled"
 					$Prop | Add-Member -type NoteProperty -Name 'Disk Type' -Value $diskTypes
 					if ($diskTypes -eq "SSD")
 					{
-						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value ""
+						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value "N/A"
 					}
 					else
 					{
-						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value $(($disks | where {$_.Aggregate -eq $volume.Aggregate}).StorageDiskInfo.DiskInventoryInfo.Rpm | Select-Object -Unique)
+						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value $(($disks | where {$_.Aggregate -eq $volume.Aggregate -and $_.StorageDiskInfo.DiskInventoryInfo.DiskType -eq $diskTypes}).StorageDiskInfo.DiskInventoryInfo.Rpm | Select-Object -Unique)
 					}
 				}
 				else
@@ -507,22 +569,30 @@ function Create-TheMatrixNeo
 		$connection=Connect-NcController $NetAppMgmtIP -Credential $cred -WarningAction silentlyContinue
 		$SysInfos=Get-NcNode
 		$Ontap=(Get-NcSystemVersion).value
-		write-host $(" ==> " + $Ontap) -ForegroundColor yellow 
-		if ($Global:ExcludeRootVol.IsPresent)
+		write-host $(" ==> " + $Ontap) -ForegroundColor yellow
+		$volumes=get-ncvol
+		if ($ExcludeRootVol.IsPresent)
 		{
-			$volumes=get-ncvol | where { $_.VolumeStateAttributes.IsNodeRoot -ne $true -and $_.VolumeStateAttributes.IsVserverRoot -ne $true }
+			$volumes=$volumes | where { $_.VolumeStateAttributes.IsNodeRoot -ne $true }
 		}
-		else
+		if ($ExcludeSVMRootVol.IsPresent)
 		{
-			$volumes=get-ncvol
+			$volumes=$volumes | where { $_.VolumeStateAttributes.IsVserverRoot -ne $true }
 		}
-		if ($Global:ExcludeMDVVol.IsPresent)
+		if ($ExcludeMDVVol.IsPresent)
 		{
 			$volumes=$volumes | where {$_.Name -notlike "MDV_???_*"}
 		}
+		if ($ExcludeTempVol.IsPresent)
+		{
+			$volumes=$volumes | where {$_.Name -notlike "temp__*"}
+		}
+
 		$disks=get-ncdisk
 		$Luns=Get-NcLun
 		$Aggrs=Get-NcAggr
+		$SmRelationShip=Get-NcSnapMirror
+		$SmSourceRelationShip=Get-NcSnapMirrorDestination
 		$VolURIs=(Invoke-WebRequest -usebasicparsing -Uri ($URI + "metrics/find?query=" + $NetAppInstance.id + ".svm.*.vol.*") | ConvertFrom-Json).id
 		foreach($volume in $volumes)
 		{
@@ -544,34 +614,54 @@ function Create-TheMatrixNeo
 				$Prop | Add-Member -type NoteProperty -Name 'Aggregate' -Value $($Node.Node + ":" + $volume.VolumeIdAttributes.ContainingAggregateName)
 				$Prop | Add-Member -type NoteProperty -Name 'Volume' -Value $($NetApp + ":" + $volume.Vserver + ":" + $volume.Name)
 				$Prop | Add-Member -type NoteProperty -Name 'Volume Type' -Value $volume.VolumeIdAttributes.StyleExtended
-				$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "N/A"
-				$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "N/A"
-				$diskTypes=($disks | where {$_.Aggregate -eq $volume.Aggregate}).DiskInventoryInfo.DiskType | Select-Object -Unique
-				if (@($diskTypes).count -eq 1)
+				if (($SmRelationShip | where { $_.DestinationLocation -eq $($volume.Vserver + ":" + $volume.Name)}).count -gt 0)
 				{
-					$Flashpool="Disabled"
-					$Prop | Add-Member -type NoteProperty -Name 'Disk Type' -Value $diskTypes
-					if ($diskTypes -eq "SSD")
+					$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "TRUE"
+				} else
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Destination Volume' -Value "FALSE"
+				}
+				if (($SmSourceRelationShip | where { $_.SourceLocation -eq $($volume.Vserver + ":" + $volume.Name)}).count -gt 0)
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "TRUE"
+				} else
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Source Volume' -Value "FALSE"
+				}
+				if ($Node.IsAllFlashOptimized)
+				{
+					$Prop | Add-Member -type NoteProperty -Name 'Disk Type' -Value "SSD"
+					$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value "N/A"
+					$Prop | Add-Member -type NoteProperty -Name 'Flash Pool' -Value "Disabled"
+				} else
+				{
+					$diskTypes=($disks | where {$_.Aggregate -eq $volume.Aggregate}).DiskInventoryInfo.DiskType | Select-Object -Unique
+					if (@($diskTypes).count -eq 1)
 					{
-						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value ""
+						$Flashpool="Disabled"
+						$Prop | Add-Member -type NoteProperty -Name 'Disk Type' -Value $diskTypes
+						if ($diskTypes -eq "SSD")
+						{
+							$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value "N/A"
+						}
+						else
+						{
+							$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value $(($disks | where {$_.Aggregate -eq $volume.Aggregate}).DiskInventoryInfo.Rpm | Select-Object -Unique)
+						}
 					}
 					else
 					{
-						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value $(($disks | where {$_.Aggregate -eq $volume.Aggregate}).DiskInventoryInfo.Rpm | Select-Object -Unique)
+						#Flashpool ..
+						$Prop | Add-Member -type NoteProperty -Name 'Disk Type' -Value $($diskTypes | where {$_ -ne "SSD"})
+						$Flashpool="Enabled"
+						$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value $(($disks | where {$_.Aggregate -eq $volume.Aggregate -and $_.DiskInventoryInfo.DiskType -ne "SSD"}).DiskInventoryInfo.Rpm | Select-Object -Unique)
 					}
+					if (($Prop.'Disk Type' -eq "FSAS") -and ($Prop.'Disk Speed' -eq "7200"))
+					{
+						$Prop.'Disk Type'="SATA"
+					}
+					$Prop | Add-Member -type NoteProperty -Name 'Flash Pool' -Value $Flashpool
 				}
-				else
-				{
-					#Flashpool ..
-					$Prop | Add-Member -type NoteProperty -Name 'Disk Type' -Value $($diskTypes | where {$_ -ne "SSD"})
-					$Flashpool="Enabled"
-					$Prop | Add-Member -type NoteProperty -Name 'Disk Speed' -Value $(($disks | where {$_.Aggregate -eq $volume.Aggregate -and $_.DiskInventoryInfo.DiskType -ne "SSD"}).DiskInventoryInfo.Rpm | Select-Object -Unique)
-				}
-				if (($Prop.'Disk Type' -eq "FSAS") -and ($Prop.'Disk Speed' -eq "7200"))
-				{
-					$Prop.'Disk Type'="SATA"
-				}
-				$Prop | Add-Member -type NoteProperty -Name 'Flash Pool' -Value $Flashpool
 				if (($Luns | where {$_.Vserver -eq $volume.Vserver -and $_.Volume -eq $volume.Name}).count -eq 0)
 				{
 					$Prop | Add-Member -type NoteProperty -Name 'Access Type' -Value "NAS"
@@ -613,6 +703,9 @@ if ($NetAppDetailsCSVFile)
 	{
 		throw "The provided csv file ($NetAppDetailsCSVFile) was not found. Exiting !"
 	}
+	$ReusePassword=$false
+	$GlobPass="None"
+	$AskReuse=$true
 	foreach ($NetApp in $NetAppDetails)
 	{
 		if ($Global:NetAppInstances.text -contains $NetApp.Netapp)
@@ -620,9 +713,27 @@ if ($NetAppDetailsCSVFile)
 			$NetAppInstance=$Global:NetAppInstances | where {$_.text -eq $NetApp.Netapp }
 			if ($NetApp.Password -eq "")
 			{
-				$NetApp.Password=read-host -Prompt $("Provide the password for '" + $NetApp.Account+ "' to access " + $NetApp.Netapp) -AsSecureString | convertfrom-securestring
-				$NetApp.Encrypted="1"
-				$overwrite=$true
+				if ($ReusePassword)
+				{
+					$NetApp.Password=$GlobPass
+					$NetApp.Encrypted="1"
+					$overwrite=$true
+				} else
+				{
+					$NetApp.Password=read-host -Prompt $("Provide the password for '" + $NetApp.Account+ "' to access " + $NetApp.Netapp) -AsSecureString | convertfrom-securestring
+					$NetApp.Encrypted="1"
+					$overwrite=$true
+					if ($AskReuse)
+					{
+						$answer=read-host -Prompt "Do you want to Reuse same password for all NetApps ? [Y] or [N]"
+						if ($answer -eq "Y")
+						{
+							$GlobPass=$NetApp.Password
+							$ReusePassword=$true
+						}
+						$AskReuse=$false
+					}
+				}
 			}
 			else
 			{
@@ -760,11 +871,14 @@ $Global:RunspaceCollection = @()
 
 $RunspacePool = [RunspaceFactory ]::CreateRunspacePool(1, $MaxThreads,$sessionstate, $Host)
 $RunspacePool.Open()
-
+$voltocompute=$global:IODensity.volume.count
+$volnum=1
 foreach ($vol in $global:IODensity.volume)
 {
 	write-host "Opening new Thread for volume: " -NoNewline
-	write-host $vol -ForegroundColor Green
+	write-host $vol -ForegroundColor Green -NoNewline
+	write-host " ("$volnum"/"$voltocompute" )"
+	$volnum++
 	$Powershell = [PowerShell]::Create().AddScript($GetGraphiteData).AddParameter("Volume",$vol)
 	$Powershell.RunspacePool = $RunspacePool
 	#New-Object PSObject -Property 
@@ -803,7 +917,8 @@ Do {
 	
 	$complete=($Global:RunspaceCollection.handle | where {$_.IsCompleted -eq $true }).count
 	$elapsed=[int]($StopWatch.Elapsed).TotalSeconds
-	write-host "`rJob completed : $complete / $totalJob (MaxThread: $MaxThreads | Elapsed in sec.: $elapsed)" -NoNewline
+	$processtime=[int]($elapsed/$complete)
+	write-host "`rJob completed : $complete / $totalJob (MaxThread: $MaxThreads | Elapsed in sec.: $elapsed | Time in sec/job: $processtime)" -NoNewline
 	If ($Global:RunspaceCollection.Handle.IsCompleted -contains $false) {$Done=$False} Else {$Done=$True}
 } Until ($Done)
 
@@ -822,35 +937,3 @@ write-host "Script executed in: " -NoNewLine
 write-host $elapsed -NoNewLine -ForeGroundColor Green
 write-host " sec"
 $StopWatch.Stop()
-
-<#
-$Volumes=@()
-foreach ($NetApp in ($global:NetAppList | where {$_.Selected -eq "1"}))
-{
-	if ($NetApp.Mode -eq "Classic")
-	{
-		$perfTree=""
-	}
-	$TmpVolList=Invoke-WebRequest -usebasicparsing -Uri ($NetApp.URI + "*") | ConvertFrom-Json
-	$Volumes=$Volumes + $TmpVolList
-	$connect=Connect-NaController 192.168.121.175 -Credential(Get-Credential)
-}
-
-foreach ($volume in $Volumes)
-{
-	$VolumeStats=@()
-}
-
-
-7-Mode:
-
-
-wv_fsinfo_blks_used
-
-
-select * from cm_storage.aggregate aggr,cm_storage.disk_aggregate dska,cm_storage.disk disk
-where aggr.id=dska.aggregate_id
-and disk.id=dska.disk_id;
-select * from cm_storage.volume;
-
-#>
